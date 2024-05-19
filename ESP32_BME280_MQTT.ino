@@ -4,7 +4,7 @@
 #include <Adafruit_Sensor.h>
 #include <Adafruit_BME280.h>
 #include <PubSubClient.h>
-#include <ESP8266WiFi.h> // ESP8266 WiFi support.  https://github.com/esp8266/Arduino/tree/master/libraries/ESP8266WiFi
+#include <WiFi.h> // Arduino Wi-Fi support.  This header is part of the standard library.  https://www.arduino.cc/en/Reference/WiFi
 
 
 Adafruit_BME280 bme280;
@@ -22,18 +22,21 @@ unsigned long brokerCoolDown        = 7000;  // The minimum time between MQTT br
 unsigned long wifiConnectionTimeout = 15000; // The amount of time to wait for a Wi-Fi connection.
 char ipAddress[16];                          // A character array to hold the IP address.
 char macAddress[18];                         // A character array to hold the MAC address, and append a dash and 3 numbers.
-char rssi;                                   // A global to hold the Received Signal Strength Indicator.
+long rssi;															     // A global to hold the Received Signal Strength Indicator.
 unsigned int ledBlinkInterval  = 200;        // Time between blinks.
 unsigned long printCount       = 0;          // A counter of how many times the stats have been published.
 unsigned long lastLedBlinkTime = 0;          // The last time LED was blinked.
 const unsigned int ONBOARD_LED = 2;          // The GPIO which the onboard LED is connected to.
 const uint16_t port            = 1883;       // The broker port.
 const String rssiTopic         = "BackDeck/SolarESP32/rssi";
+const String ipTopic           = "BackDeck/SolarESP32/ip";
+const String macTopic          = "BackDeck/SolarESP32/mac";
 const String tempCTopic        = "BackDeck/SolarESP32/bme280/tempC";
 const String tempFTopic        = "BackDeck/SolarESP32/bme280/tempF";
 const String humidityTopic     = "BackDeck/SolarESP32/bme280/humidity";
 const String pressureTopic     = "BackDeck/SolarESP32/bme280/pressure";
 const String altitudeTopic     = "BackDeck/SolarESP32/bme280/altitude";
+const String HOSTNAME          = "GenericESP";       // The HOSTNAME.
 float tempC                    = 21.12F;
 float tempF                    = 21.12F;
 float pressureHpa              = 21.12F;
@@ -43,22 +46,11 @@ float humidity                 = 21.12F;
 
 void printValues() 
 {
-  float tempC = bme280.readTemperature();
-  float tempF = ( tempC * 1.8 ) + 32;
-  float pressureHpa = bme280.readPressure() / 100.0F;
-  float altitudeMeters = bme280.readAltitude( seaLevelPressureHpa );
-  float humidity = bme280.readHumidity();
-
   Serial.printf( "Temperature: %.2f °C\n", tempC );
-
   Serial.printf( "Temperature: %.2f °F\n", tempF );
-
   Serial.printf( "Pressure: %.2f hPa\n", pressureHpa );
-
   Serial.printf( "Humidity: %.2f %%\n", humidity );
-
   Serial.printf( "Altitude: %.1f m\n", altitudeMeters );
-
   Serial.println();
 }
 
@@ -209,7 +201,36 @@ void publishTelemetry()
    mqttClient.publish( pressureTopic.c_str(), pressureValue.c_str() );
    mqttClient.publish( humidityTopic.c_str(), humidityValue.c_str() );
    mqttClient.publish( altitudeTopic.c_str(), altitudeValue.c_str() );
+   mqttClient.publish( ipTopic.c_str(), ipAddress );
+   mqttClient.publish( macTopic.c_str(), macAddress );
 } // End of the publishTelemetry() function.
+
+
+/**
+ * @brief checkForSSID() will scan for all visible SSIDs, see if any match 'ssidName',
+ * and return a count of how many matches were found.
+ *
+ * @param ssidName the SSID name to search for.
+ * @return int the count of SSIDs which match the passed parameter.
+ */
+int checkForSSID( const char *ssidName )
+{
+	int ssidCount = 0;
+	byte networkCount = WiFi.scanNetworks();
+	if( networkCount == 0 )
+		Serial.println( "No WiFi SSIDs are in range!" );
+	else
+	{
+		Serial.printf( "WiFi SSIDs in range: %d\n", networkCount );
+		for( int i = 0; i < networkCount; ++i )
+		{
+			// Check to see if this SSID matches the parameter.
+			if( strcmp( ssidName, WiFi.SSID( i ).c_str() ) == 0 )
+				ssidCount++;
+		}
+	}
+	return ssidCount;
+} // End of checkForSSID() function.
 
 
 /**
@@ -220,10 +241,17 @@ void wifiBasicConnect()
    // Turn the LED off to show Wi-Fi is not connected.
    digitalWrite( ONBOARD_LED, LOW );
 
+  // Don't even try to connect if the SSID cannot be found.
+  int ssidCount = checkForSSID( WIFI_SSID );
+  if( ssidCount < 1 ) 
+    return;
+  else
+   Serial.printf( "Found %d matching SSID.\n", ssidCount );
+
    Serial.printf( "Attempting to connect to Wi-Fi SSID '%s'", WIFI_SSID );
    WiFi.mode( WIFI_STA );
    WiFi.config( INADDR_NONE, INADDR_NONE, INADDR_NONE, INADDR_NONE );
-   WiFi.setHostname( HOSTNAME );
+  //  WiFi.setHostname( HOSTNAME );
    WiFi.begin( WIFI_SSID, WIFI_PASSWORD );
 
    unsigned long wifiConnectionStartTime = millis();
@@ -238,8 +266,8 @@ void wifiBasicConnect()
 
    if( WiFi.status() == WL_CONNECTED )
    {
-      Serial.print( "wifiClient.status(): " );
-      Serial.println( wifiClient.status() );
+      Serial.print( "WiFi.status(): " );
+      Serial.println( WiFi.status() );
       Serial.print( "WL_CONNECTED: " );
       Serial.println( WL_CONNECTED );
       // Print that Wi-Fi has connected.
@@ -324,7 +352,11 @@ void setup()
   if( !Serial )
     delay( 1000 );
   Serial.println();
-  Serial.println( F( "BME280 test" ) );
+  Serial.println( F( "Beginning setup..." ) );
+
+	// Get the MAC address and store it in macAddress.
+	snprintf( macAddress, 18, "%s", WiFi.macAddress().c_str() );
+
 
   unsigned status = bme280.begin( 0x76 );
   if( !status )
@@ -341,15 +373,42 @@ void setup()
     while( 1 )
       delay( 10 );
   }
+  Serial.println( F( "Setup complete." ) );
   Serial.println();
 }
 
 
 void loop() 
 {
+	if( WiFiClass::status() != WL_CONNECTED )
+		wifiBasicConnect();
+	else if( !mqttClient.connected() )
+		mqttConnect();
+	else
+		mqttClient.loop();
+
   if( lastPrintTime == 0 || ( ( millis() - lastPrintTime ) > printInterval ) )
   {
-    printValues();
+		pollTelemetry();
+    printTelemetry();
+		publishTelemetry();
     lastPrintTime = millis();
+		Serial.printf( "Next print in %u seconds.\n\n", printInterval / 1000 );
   }
+
+	// Turn on the LED if MQTT is connected, otherwise blink the LED.
+	if( lastLedBlinkTime == 0 || ( ( millis() - lastLedBlinkTime ) > ledBlinkInterval ) )
+	{
+		// If Wi-Fi is connected, but MQTT is not, blink the LED.
+		if( WiFiClass::status() == WL_CONNECTED )
+		{
+			if( mqttClient.state() != 0 )
+				toggleLED();						  // Toggle the LED state to show that Wi-Fi is connected but MQTT is not.
+			else
+				digitalWrite( ONBOARD_LED, 1 ); // Turn the LED on to show both Wi-Fi and MQTT are connected.
+		}
+		else
+			digitalWrite( ONBOARD_LED, 0 ); // Turn the LED off to show that Wi-Fi is not connected.
+		lastLedBlinkTime = millis();
+	}
 }
