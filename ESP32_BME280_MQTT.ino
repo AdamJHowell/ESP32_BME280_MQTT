@@ -1,13 +1,44 @@
+#include "privateInfo.h"
 #include <Wire.h>
 #include <SPI.h>
 #include <Adafruit_Sensor.h>
 #include <Adafruit_BME280.h>
+#include <PubSubClient.h>
+#include <ESP8266WiFi.h> // ESP8266 WiFi support.  https://github.com/esp8266/Arduino/tree/master/libraries/ESP8266WiFi
 
 
 Adafruit_BME280 bme280;
-unsigned int printInterval = 10000;  // How long to wait between stat printouts.
-unsigned long lastPrintTime = 0;     // The last time a MQTT publish was performed.
-const float seaLevelPressureHpa = 1013.25;
+WiFiClient wifiClient;
+PubSubClient mqttClient( wifiClient );
+const float seaLevelPressureHpa     = 1013.25;
+const unsigned int printInterval    = 10000; // How long to wait between stat printouts.
+unsigned long lastPrintTime         = 0;     // The last time a MQTT publish was performed.
+const unsigned int pollInterval     = 5000;  // How long to wait between polling telemetry.
+unsigned long lastPollTime          = 0;     // The last time a telemetry poll was performed.
+const unsigned int publishInterval  = 20000; // How long to wait between publishing telemetry.
+unsigned long lastPublishTime       = 0;     // The last time a telemetry publish was performed.
+unsigned long lastBrokerConnect     = 0;     // The last time a MQTT broker connection was attempted.
+unsigned long brokerCoolDown        = 7000;  // The minimum time between MQTT broker connection attempts.
+unsigned long wifiConnectionTimeout = 15000; // The amount of time to wait for a Wi-Fi connection.
+char ipAddress[16];                          // A character array to hold the IP address.
+char macAddress[18];                         // A character array to hold the MAC address, and append a dash and 3 numbers.
+char rssi;                                   // A global to hold the Received Signal Strength Indicator.
+unsigned int ledBlinkInterval  = 200;        // Time between blinks.
+unsigned long printCount       = 0;          // A counter of how many times the stats have been published.
+unsigned long lastLedBlinkTime = 0;          // The last time LED was blinked.
+const unsigned int ONBOARD_LED = 2;          // The GPIO which the onboard LED is connected to.
+const uint16_t port            = 1883;       // The broker port.
+const String rssiTopic         = "BackDeck/SolarESP32/rssi";
+const String tempCTopic        = "BackDeck/SolarESP32/bme280/tempC";
+const String tempFTopic        = "BackDeck/SolarESP32/bme280/tempF";
+const String humidityTopic     = "BackDeck/SolarESP32/bme280/humidity";
+const String pressureTopic     = "BackDeck/SolarESP32/bme280/pressure";
+const String altitudeTopic     = "BackDeck/SolarESP32/bme280/altitude";
+float tempC                    = 21.12F;
+float tempF                    = 21.12F;
+float pressureHpa              = 21.12F;
+float altitudeMeters           = 21.12F;
+float humidity                 = 21.12F;
 
 
 void printValues() 
